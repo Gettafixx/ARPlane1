@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>AR Object Placer</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            color: #fff;
+            background-color: #000;
+        }
+        canvas {
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        #ar-button {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            border: 1px solid #fff;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.5);
+            color: white;
+            font-size: 18px;
+            cursor: pointer;
+            z-index: 10;
+        }
+        #info-box {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.6);
+            border-radius: 8px;
+            font-size: 16px;
+            text-align: center;
+            z-index: 10;
+            display: none; /* Hidden by default */
+        }
+    </style>
+</head>
+<body>
+    <!-- Container for the Three.js scene -->
+    <div id="container"></div>
+    
+    <!-- UI Elements -->
+    <div id="info-box">Scan the floor to find a surface, then tap to place the object.</div>
+    
+    <!-- Import maps for Three.js modules -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+
+    <script type="module">
+        // Import necessary modules from Three.js
+        import * as THREE from 'three';
+        import { ARButton } from 'three/addons/webxr/ARButton.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // Core Three.js variables
+        let camera, scene, renderer;
+        let controller;
+        let reticle; // The ring that shows where the object will be placed
+        let placedObject = null; // To hold our 3D model
+
+        // WebXR variables
+        let hitTestSource = null;
+        let hitTestSourceRequested = false;
+
+        // Touch gesture variables for manipulation
+        let touchDown = false;
+        let touchX = 0;
+        let touchY = 0;
+        let initialDistance = 0;
+        let initialScale = new THREE.Vector3();
+
+        // UI Elements
+        const infoBox = document.getElementById('info-box');
+
+        init();
+        animate();
+
+        function init() {
+            const container = document.getElementById('container');
+
+            // --- Scene and Camera Setup ---
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+            // --- Lighting ---
+            // HemisphereLight provides a soft ambient light from above and below
+            const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2);
+            hemisphereLight.position.set(0, 2, 0);
+            scene.add(hemisphereLight);
+
+            // DirectionalLight simulates sunlight
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
+            directionalLight.position.set(0, 2, 1);
+            scene.add(directionalLight);
+
+            // --- Renderer Setup ---
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            // Enable WebXR
+            renderer.xr.enabled = true;
+            container.appendChild(renderer.domElement);
+
+            // --- AR Button ---
+            // This button handles entering and exiting the AR session.
+            const arButton = ARButton.createButton(renderer, {
+                requiredFeatures: ['hit-test'], // We need hit-testing to find surfaces
+                optionalFeatures: ['dom-overlay'], // To show HTML UI
+                domOverlay: { root: document.body }
+            });
+            arButton.id = 'ar-button';
+            document.body.appendChild(arButton);
+            
+            // Show instructions when AR session starts
+            renderer.xr.addEventListener('sessionstart', () => {
+                infoBox.style.display = 'block';
+            });
+
+            // --- Reticle (Placement Indicator) ---
+            // This is a visual guide for the user on where the object will be placed.
+            reticle = new THREE.Mesh(
+                new THREE.RingGeometry(0.1, 0.15, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0xffffff })
+            );
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+
+            // --- Controller (User Input) ---
+            controller = renderer.xr.getController(0);
+            controller.addEventListener('select', onSelect);
+            scene.add(controller);
+
+            // --- Touch Events for Manipulation ---
+            window.addEventListener('touchstart', onTouchStart, false);
+            window.addEventListener('touchmove', onTouchMove, false);
+            window.addEventListener('touchend', onTouchEnd, false);
+
+            // --- Event listener for window resize ---
+            window.addEventListener('resize', onWindowResize, false);
+        }
+
+        /**
+         * Handles the 'select' event from the XR controller (a tap on the screen).
+         * Places the 3D model if a surface is detected.
+         */
+        function onSelect() {
+            // Check if the reticle is visible, which means we have a valid hit-test result.
+            if (reticle.visible) {
+                // If an object hasn't been placed yet, load and place it.
+                if (!placedObject) {
+                    const loader = new GLTFLoader();
+                    // Load a GLB model. Replace with your model's URL.
+                    loader.load(
+                        'https://cdn.glitch.global/a583487a-415c-4ddf-8919-1f271a4163b6/chair.glb?v=1628173499093',
+                        function (gltf) {
+                            placedObject = gltf.scene;
+                            // Position the model at the reticle's location
+                            placedObject.position.setFromMatrixPosition(reticle.matrix);
+                            // Set a realistic initial scale
+                            placedObject.scale.set(0.5, 0.5, 0.5); 
+                            scene.add(placedObject);
+
+                            // Hide the reticle and instructions after placing the object
+                            reticle.visible = false;
+                            infoBox.style.display = 'none';
+                        },
+                        undefined, // onProgress callback (optional)
+                        function (error) {
+                            console.error('An error happened while loading the model:', error);
+                            infoBox.textContent = 'Error loading model.';
+                        }
+                    );
+                }
+            }
+        }
+
+        /**
+         * Handles the start of a touch gesture.
+         * @param {TouchEvent} event The touch event.
+         */
+        function onTouchStart(event) {
+            if (placedObject) {
+                touchDown = true;
+                // One finger for rotation
+                if (event.touches.length === 1) {
+                    touchX = event.touches[0].pageX;
+                    touchY = event.touches[0].pageY;
+                }
+                // Two fingers for scaling
+                if (event.touches.length === 2) {
+                    const dx = event.touches[0].pageX - event.touches[1].pageX;
+                    const dy = event.touches[0].pageY - event.touches[1].pageY;
+                    initialDistance = Math.sqrt(dx * dx + dy * dy);
+                    initialScale.copy(placedObject.scale);
+                }
+            }
+        }
+
+        /**
+         * Handles the movement of a touch gesture.
+         * @param {TouchEvent} event The touch event.
+         */
+        function onTouchMove(event) {
+            if (touchDown && placedObject) {
+                // --- One-finger drag for rotation ---
+                if (event.touches.length === 1) {
+                    const deltaX = event.touches[0].pageX - touchX;
+                    placedObject.rotation.y += deltaX * 0.01; // Adjust sensitivity as needed
+                    touchX = event.touches[0].pageX;
+                }
+
+                // --- Two-finger pinch for scaling ---
+                if (event.touches.length === 2) {
+                    const dx = event.touches[0].pageX - event.touches[1].pageX;
+                    const dy = event.touches[0].pageY - event.touches[1].pageY;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const scaleFactor = distance / initialDistance;
+                    const newScale = initialScale.clone().multiplyScalar(scaleFactor);
+                    placedObject.scale.copy(newScale);
+                }
+            }
+        }
+
+        /**
+         * Handles the end of a touch gesture.
+         */
+        function onTouchEnd() {
+            touchDown = false;
+        }
+
+
+        /**
+         * Handles window resize events to keep the camera and renderer updated.
+         */
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        /**
+         * The main animation loop, called on every frame.
+         */
+        function animate() {
+            renderer.setAnimationLoop(render);
+        }
+
+        /**
+         * The render function, called by the animation loop.
+         * @param {number} timestamp The current time.
+         * @param {XRFrame} frame The WebXR frame data.
+         */
+        function render(timestamp, frame) {
+            if (frame) {
+                const referenceSpace = renderer.xr.getReferenceSpace();
+                const session = renderer.xr.getSession();
+
+                // Request hit test source only once
+                if (hitTestSourceRequested === false) {
+                    session.requestReferenceSpace('viewer').then(function (referenceSpace) {
+                        session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
+                            hitTestSource = source;
+                        });
+                    });
+
+                    session.addEventListener('end', function () {
+                        hitTestSourceRequested = false;
+                        hitTestSource = null;
+                        // Reset when session ends
+                        if (placedObject) {
+                            scene.remove(placedObject);
+                            placedObject = null;
+                        }
+                        infoBox.style.display = 'none';
+                    });
+
+                    hitTestSourceRequested = true;
+                }
+
+                // Perform hit testing
+                if (hitTestSource) {
+                    const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+                    // If we have hit results and no object is placed yet, show the reticle
+                    if (hitTestResults.length > 0 && !placedObject) {
+                        const hit = hitTestResults[0];
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
+                    } else {
+                        reticle.visible = false;
+                    }
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+
+    </script>
+</body>
+</html>
