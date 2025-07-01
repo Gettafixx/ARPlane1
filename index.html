@@ -170,15 +170,15 @@
                 // If an object hasn't been placed yet, load and place it.
                 if (!placedObject) {
                     const loader = new GLTFLoader();
-                    // Load a GLB model. Replace with your model's URL.
+                    // Load a GLB model. Using a reliable model from the Three.js examples.
                     loader.load(
-                        'https://cdn.glitch.global/a583487a-415c-4ddf-8919-1f271a4163b6/chair.glb?v=1628173499093',
+                        'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/models/gltf/Horse.glb',
                         function (gltf) {
                             placedObject = gltf.scene;
                             // Position the model at the reticle's location
                             placedObject.position.setFromMatrixPosition(reticle.matrix);
-                            // Set a realistic initial scale
-                            placedObject.scale.set(0.5, 0.5, 0.5); 
+                            // Set a realistic initial scale (this may need adjustment for different models)
+                            placedObject.scale.set(0.01, 0.01, 0.01); 
                             scene.add(placedObject);
 
                             // Hide the reticle and instructions after placing the object
