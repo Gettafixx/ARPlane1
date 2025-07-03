@@ -103,12 +103,10 @@
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
             // --- Lighting ---
-            // HemisphereLight provides a soft ambient light from above and below
             const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
-            hemisphereLight.position.set(0, 2, 0);
+            hemisphereLight.position.set(0.5, 1, 0.25);
             scene.add(hemisphereLight);
 
-            // DirectionalLight simulates sunlight
             const directionalLight = new THREE.DirectionalLight(0xffffff, 2);
             directionalLight.position.set(0, 2, 1);
             scene.add(directionalLight);
@@ -117,27 +115,23 @@
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
-            // Enable WebXR
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
-            // --- AR Button ---
-            // This button handles entering and exiting the AR session.
+            // --- AR Button (iOS Compatibility Fix) ---
+            // This setup is more robust for different browsers and devices.
             const arButton = ARButton.createButton(renderer, {
-                requiredFeatures: ['hit-test'], // We need hit-testing to find surfaces
-                optionalFeatures: ['dom-overlay'], // To show HTML UI
+                requiredFeatures: ['hit-test', 'dom-overlay'],
                 domOverlay: { root: document.body }
             });
             arButton.id = 'ar-button';
             document.body.appendChild(arButton);
             
-            // Show instructions when AR session starts
             renderer.xr.addEventListener('sessionstart', () => {
                 infoBox.style.display = 'block';
             });
 
             // --- Reticle (Placement Indicator) ---
-            // This is a visual guide for the user on where the object will be placed.
             reticle = new THREE.Mesh(
                 new THREE.RingGeometry(0.1, 0.15, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0xffffff })
@@ -156,58 +150,52 @@
             window.addEventListener('touchmove', onTouchMove, false);
             window.addEventListener('touchend', onTouchEnd, false);
 
-            // --- Event listener for window resize ---
             window.addEventListener('resize', onWindowResize, false);
         }
 
-        /**
-         * Handles the 'select' event from the XR controller (a tap on the screen).
-         * Places the 3D model if a surface is detected.
-         */
         function onSelect() {
-            // Check if the reticle is visible, which means we have a valid hit-test result.
-            if (reticle.visible) {
-                // If an object hasn't been placed yet, load and place it.
-                if (!placedObject) {
-                    const loader = new GLTFLoader();
-                    // Loading your model from your GitHub repository.
-                    loader.load(
-                        'https://raw.githubusercontent.com/Gettafixx/ARPlane1/main/Isometric.glb',
-                        function (gltf) {
-                            placedObject = gltf.scene;
-                            // Position the model at the reticle's location
-                            placedObject.position.setFromMatrixPosition(reticle.matrix);
-                            // Set an initial scale. You may need to adjust this for your model.
-                            placedObject.scale.set(1, 1, 1); 
-                            scene.add(placedObject);
-
-                            // Hide the reticle and instructions after placing the object
-                            reticle.visible = false;
-                            infoBox.style.display = 'none';
-                        },
-                        undefined, // onProgress callback (optional)
-                        function (error) {
-                            console.error('An error happened while loading the model:', error);
-                            infoBox.textContent = 'Error loading model. Check GitHub URL and browser console.';
-                        }
-                    );
-                }
+            if (reticle.visible && !placedObject) {
+                const loader = new GLTFLoader();
+                // Attempt to load your model from GitHub
+                loader.load(
+                    'https://raw.githubusercontent.com/Gettafixx/ARPlane1/main/Isometric.glb',
+                    function (gltf) {
+                        // Success loading your model
+                        console.log("Successfully loaded model from GitHub.");
+                        placedObject = gltf.scene;
+                        placedObject.position.setFromMatrixPosition(reticle.matrix);
+                        placedObject.scale.set(1, 1, 1); // Adjust scale if needed
+                        scene.add(placedObject);
+                        reticle.visible = false;
+                        infoBox.style.display = 'none';
+                    },
+                    undefined,
+                    function (error) {
+                        // Error loading your model, load a fallback instead
+                        console.error('Error loading model from GitHub:', error);
+                        infoBox.textContent = 'Could not load your model. Loading a fallback.';
+                        loader.load(
+                            'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/models/gltf/Horse.glb',
+                            function (gltf) {
+                                placedObject = gltf.scene;
+                                placedObject.position.setFromMatrixPosition(reticle.matrix);
+                                placedObject.scale.set(0.01, 0.01, 0.01);
+                                scene.add(placedObject);
+                                reticle.visible = false;
+                                infoBox.style.display = 'none';
+                            }
+                        );
+                    }
+                );
             }
         }
 
-        /**
-         * Handles the start of a touch gesture.
-         * @param {TouchEvent} event The touch event.
-         */
         function onTouchStart(event) {
             if (placedObject) {
                 touchDown = true;
-                // One finger for rotation
                 if (event.touches.length === 1) {
                     touchX = event.touches[0].pageX;
-                    touchY = event.touches[0].pageY;
                 }
-                // Two fingers for scaling
                 if (event.touches.length === 2) {
                     const dx = event.touches[0].pageX - event.touches[1].pageX;
                     const dy = event.touches[0].pageY - event.touches[1].pageY;
@@ -217,20 +205,13 @@
             }
         }
 
-        /**
-         * Handles the movement of a touch gesture.
-         * @param {TouchEvent} event The touch event.
-         */
         function onTouchMove(event) {
             if (touchDown && placedObject) {
-                // --- One-finger drag for rotation ---
                 if (event.touches.length === 1) {
                     const deltaX = event.touches[0].pageX - touchX;
-                    placedObject.rotation.y += deltaX * 0.01; // Adjust sensitivity as needed
+                    placedObject.rotation.y += deltaX * 0.01;
                     touchX = event.touches[0].pageX;
                 }
-
-                // --- Two-finger pinch for scaling ---
                 if (event.touches.length === 2) {
                     const dx = event.touches[0].pageX - event.touches[1].pageX;
                     const dy = event.touches[0].pageY - event.touches[1].pageY;
@@ -242,42 +223,26 @@
             }
         }
 
-        /**
-         * Handles the end of a touch gesture.
-         */
         function onTouchEnd() {
             touchDown = false;
         }
 
-
-        /**
-         * Handles window resize events to keep the camera and renderer updated.
-         */
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        /**
-         * The main animation loop, called on every frame.
-         */
         function animate() {
             renderer.setAnimationLoop(render);
         }
 
-        /**
-         * The render function, called by the animation loop.
-         * @param {number} timestamp The current time.
-         * @param {XRFrame} frame The WebXR frame data.
-         */
         function render(timestamp, frame) {
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                // Request hit test source only once
-                if (hitTestSourceRequested === false) {
+                if (!hitTestSourceRequested) {
                     session.requestReferenceSpace('viewer').then(function (referenceSpace) {
                         session.requestHitTestSource({ space: referenceSpace }).then(function (source) {
                             hitTestSource = source;
@@ -287,23 +252,18 @@
                     session.addEventListener('end', function () {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
-                        // Reset when session ends
                         if (placedObject) {
                             scene.remove(placedObject);
                             placedObject = null;
                         }
                         infoBox.style.display = 'none';
-                        reticle.visible = true; // Show reticle again for placing a new object
                     });
 
                     hitTestSourceRequested = true;
                 }
 
-                // Perform hit testing
                 if (hitTestSource) {
                     const hitTestResults = frame.getHitTestResults(hitTestSource);
-
-                    // If we have hit results and no object is placed yet, show the reticle
                     if (hitTestResults.length > 0 && !placedObject) {
                         const hit = hitTestResults[0];
                         reticle.visible = true;
@@ -313,10 +273,8 @@
                     }
                 }
             }
-
             renderer.render(scene, camera);
         }
-
     </script>
 </body>
 </html>
