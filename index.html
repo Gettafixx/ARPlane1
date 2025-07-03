@@ -104,7 +104,7 @@
 
             // --- Lighting ---
             // HemisphereLight provides a soft ambient light from above and below
-            const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x444444, 2);
+            const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 3);
             hemisphereLight.position.set(0, 2, 0);
             scene.add(hemisphereLight);
 
@@ -170,15 +170,15 @@
                 // If an object hasn't been placed yet, load and place it.
                 if (!placedObject) {
                     const loader = new GLTFLoader();
-                    // Load a GLB model. Using a reliable model from the Three.js examples.
+                    // Loading your model from your GitHub repository.
                     loader.load(
-                        'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/models/gltf/Horse.glb',
+                        'https://raw.githubusercontent.com/Gettafixx/ARPlane1/main/Isometric.glb',
                         function (gltf) {
                             placedObject = gltf.scene;
                             // Position the model at the reticle's location
                             placedObject.position.setFromMatrixPosition(reticle.matrix);
-                            // Set a realistic initial scale (this may need adjustment for different models)
-                            placedObject.scale.set(0.01, 0.01, 0.01); 
+                            // Set an initial scale. You may need to adjust this for your model.
+                            placedObject.scale.set(1, 1, 1); 
                             scene.add(placedObject);
 
                             // Hide the reticle and instructions after placing the object
@@ -188,7 +188,7 @@
                         undefined, // onProgress callback (optional)
                         function (error) {
                             console.error('An error happened while loading the model:', error);
-                            infoBox.textContent = 'Error loading model.';
+                            infoBox.textContent = 'Error loading model. Check GitHub URL and browser console.';
                         }
                     );
                 }
@@ -293,6 +293,7 @@
                             placedObject = null;
                         }
                         infoBox.style.display = 'none';
+                        reticle.visible = true; // Show reticle again for placing a new object
                     });
 
                     hitTestSourceRequested = true;
