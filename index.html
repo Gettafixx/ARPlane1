@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <title>AR Plane Viewer</title>
+    <title>AR Plane Viewer (v2)</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <style>
@@ -79,8 +79,6 @@
         
         // For interaction
         let touchDown = false;
-        let touchTime = 0;
-        let lastTap = 0;
         let pinchStartDistance = 0;
         let initialScale = new THREE.Vector3(1, 1, 1);
 
@@ -115,17 +113,25 @@
             container.appendChild(renderer.domElement);
 
             // --- AR Button ---
-            const arButton = ARButton.createButton(renderer, {
-                requiredFeatures: ['hit-test', 'plane-detection'],
-                optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: document.body }
-            });
-            arButton.id = 'ar-button';
-            document.body.appendChild(arButton);
-            
-            arButton.addEventListener('click', () => {
-                infoBox.style.display = 'block';
-            });
+            try {
+                const arButton = ARButton.createButton(renderer, {
+                    requiredFeatures: ['hit-test', 'plane-detection'],
+                    optionalFeatures: ['dom-overlay'],
+                    domOverlay: { root: document.body }
+                });
+                arButton.id = 'ar-button';
+                document.body.appendChild(arButton);
+                
+                arButton.addEventListener('click', () => {
+                    infoBox.style.display = 'block';
+                });
+            } catch (e) {
+                console.error("ARButton creation failed:", e);
+                const noArButton = document.createElement('div');
+                noArButton.id = 'ar-button';
+                noArButton.innerHTML = "AR NOT SUPPORTED";
+                document.body.appendChild(noArButton);
+            }
 
 
             // --- Reticle (Placement Indicator) ---
@@ -147,7 +153,11 @@
             loader.load(modelUrl, (gltf) => {
                 loadedModel = gltf.scene;
                 console.log("Model loaded successfully.");
-                 infoBox.textContent = "Model loaded. Find a surface and tap to place.";
+                if (renderer.xr.isPresenting) {
+                    infoBox.textContent = "Model loaded. Find a surface and tap to place.";
+                } else {
+                    infoBox.textContent = "Model loaded. Enter AR to place.";
+                }
             }, undefined, (error) => {
                 console.error('An error happened while loading the model:', error);
                 infoBox.textContent = "Error loading model. Please refresh.";
@@ -186,12 +196,9 @@
 
         function onTouchStart(event) {
             event.preventDefault();
-            if (!placedModel) return;
-
             if (event.touches.length === 1) {
                 touchDown = true;
-                touchTime = Date.now();
-            } else if (event.touches.length === 2) {
+            } else if (event.touches.length === 2 && placedModel) {
                 pinchStartDistance = getPinchDistance(event.touches);
                 initialScale.copy(placedModel.scale);
             }
@@ -199,10 +206,8 @@
 
         function onTouchMove(event) {
             event.preventDefault();
-            if (!placedModel) return;
-
             // --- Scaling (Pinch) ---
-            if (event.touches.length === 2) {
+            if (event.touches.length === 2 && placedModel) {
                 const currentPinchDistance = getPinchDistance(event.touches);
                 const scaleFactor = currentPinchDistance / pinchStartDistance;
                 const newScale = initialScale.clone().multiplyScalar(scaleFactor);
@@ -212,8 +217,6 @@
 
         function onTouchEnd(event) {
             event.preventDefault();
-            if (!placedModel) return;
-
             touchDown = false;
             pinchStartDistance = 0; // Reset pinch distance
         }
@@ -238,14 +241,19 @@
                     session.requestReferenceSpace('viewer').then((referenceSpace) => {
                         session.requestHitTestSource({ space: referenceSpace }).then((source) => {
                             hitTestSource = source;
-                        });
+                        }).catch(e => console.error("Hit test source request failed:", e));
                     });
                     session.addEventListener('end', () => {
                         hitTestSourceRequested = false;
                         hitTestSource = null;
-                        // Reset scene on exit
                         if (placedModel) {
                             scene.remove(placedModel);
+                            placedModel.traverse(child => {
+                                if (child.isMesh) {
+                                    child.geometry.dispose();
+                                    child.material.dispose();
+                                }
+                            });
                             placedModel = null;
                         }
                         reticle.visible = false;
@@ -261,9 +269,9 @@
                         reticle.visible = true;
                         reticle.matrix.fromArray(hit.getPose(referenceSpace).transform.matrix);
                         
-                        // --- Drag to Move Logic ---
+                        // --- CORRECTED Drag to Move Logic ---
                         // If one finger is down and we have a hit, move the object
-                        if (touchDown && event.touches && event.touches.length === 1 && placedModel) {
+                        if (touchDown && placedModel) {
                              placedModel.position.setFromMatrixPosition(reticle.matrix);
                         }
 
